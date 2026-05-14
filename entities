@@ -1,0 +1,51 @@
+{
+  "name": "Absence",
+  "type": "object",
+  "properties": {
+    "student_id": {
+      "type": "string",
+      "description": "ID de l'\u00e9l\u00e8ve"
+    },
+    "class_level": {
+      "type": "string",
+      "enum": [
+        "1ere",
+        "2eme",
+        "3eme",
+        "4eme",
+        "5eme",
+        "6eme"
+      ],
+      "description": "Niveau de classe"
+    },
+    "period": {
+      "type": "number",
+      "enum": [
+        1,
+        2,
+        3
+      ],
+      "description": "P\u00e9riode du bulletin"
+    },
+    "absences_justifiees": {
+      "type": "number",
+      "default": 0,
+      "description": "Nombre d'absences justifi\u00e9es"
+    },
+    "absences_non_justifiees": {
+      "type": "number",
+      "default": 0,
+      "description": "Nombre d'absences non justifi\u00e9es"
+    },
+    "retards": {
+      "type": "number",
+      "default": 0,
+      "description": "Nombre de retards"
+    }
+  },
+  "required": [
+    "student_id",
+    "class_level",
+    "period"
+  ]
+}
