@@ -1,0 +1,93 @@
+import React from 'react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { X } from 'lucide-react';
+
+const CLASS_LABELS = { '1ere': '1ère', '2eme': '2ème', '3eme': '3ème', '4eme': '4ème', '5eme': '5ème', '6eme': '6ème' };
+
+export default function AbsenceFilters({ filters, onFilterChange, students, hasActiveFilters }) {
+  return (
+    <Card className="border-slate-200">
+      <CardContent className="p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1">Classe</label>
+            <Select value={filters.classLevel || ''} onValueChange={(v) => onFilterChange('classLevel', v || null)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Toutes les classes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={null}>Toutes les classes</SelectItem>
+                {Object.entries(CLASS_LABELS).map(([key, label]) => (
+                  <SelectItem key={key} value={key}>{label} année</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1">Période</label>
+            <Select value={filters.period?.toString() || ''} onValueChange={(v) => onFilterChange('period', v ? parseInt(v) : null)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Toutes les périodes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={null}>Toutes les périodes</SelectItem>
+                <SelectItem value="1">Période 1</SelectItem>
+                <SelectItem value="2">Période 2</SelectItem>
+                <SelectItem value="3">Période 3</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1">Type d'absence</label>
+            <Select value={filters.absenceType || ''} onValueChange={(v) => onFilterChange('absenceType', v || null)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Tous les types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={null}>Tous les types</SelectItem>
+                <SelectItem value="justifiee">Justifiée</SelectItem>
+                <SelectItem value="non_justifiee">Non justifiée</SelectItem>
+                <SelectItem value="retard">Retard</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1">Élève</label>
+            <Select value={filters.studentId || ''} onValueChange={(v) => onFilterChange('studentId', v || null)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Tous les élèves" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={null}>Tous les élèves</SelectItem>
+                {students.map(s => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.first_name} {s.last_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {hasActiveFilters && (
+            <div className="flex items-end">
+              <Button
+                variant="outline"
+                onClick={() => onFilterChange('reset', true)}
+                className="w-full"
+              >
+                <X className="w-4 h-4 mr-1" />
+                Réinitialiser
+              </Button>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
