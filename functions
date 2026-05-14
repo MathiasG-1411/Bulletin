@@ -1,0 +1,260 @@
+import { base44 } from '@/api/base44Client';
+
+/**
+ * Vérifie les alertes déclenchées pour tous les élèves
+ * Basé sur les configurations d'alertes activées
+ */
+export async function checkAndCreateAlerts() {
+  try {
+    // Récupérer les configurations d'alertes activées
+    const configurations = await base44.entities.AlertConfiguration.filter(
+      { enabled: true }
+    );
+
+    if (!configurations || configurations.length === 0) return;
+
+    // Récupérer les étudiants, évaluations, absences
+    const [students, evaluations, absences, expectations, subjects] = await Promise.all([
+      base44.entities.Student.list(),
+      base44.entities.Evaluation.list(),
+      base44.entities.Absence.list(),
+      base44.entities.Expectation.list(),
+      base44.entities.Subject.list(),
+    ]);
+
+    // Vérifier chaque configuration
+    for (const config of configurations) {
+      if (config.alert_type === 'performance_drop') {
+        await checkPerformanceDrop(
+          config,
+          students,
+          evaluations,
+          expectations,
+          subjects
+        );
+      } else if (config.alert_type === 'absence_accumulation') {
+        await checkAbsenceAccumulation(config, students, absences);
+      } else if (config.alert_type === 'low_success_rate') {
+        await checkLowSuccessRate(
+          config,
+          students,
+          evaluations,
+          expectations,
+          subjects
+        );
+      }
+    }
+  } catch (error) {
+    console.error('Erreur lors de la vérification des alertes:', error);
+  }
+}
+
+/**
+ * Vérifie la baisse de performance dans une matière
+ */
+async function checkPerformanceDrop(
+  config,
+  students,
+  evaluations,
+  expectations,
+  subjects
+) {
+  const relevantStudents = filterStudentsByClass(students, config.class_level);
+
+  for (const student of relevantStudents) {
+    // Obtenir les périodes précédentes et actuelle
+    const currentPeriod = config.check_period || 3;
+    const previousPeriod = currentPeriod > 1 ? currentPeriod - 1 : currentPeriod;
+
+    const currentRate = calculateSuccessRate(
+      student.id,
+      currentPeriod,
+      config.subject_id,
+      evaluations,
+      expectations
+    );
+    const previousRate = calculateSuccessRate(
+      student.id,
+      previousPeriod,
+      config.subject_id,
+      evaluations,
+      expectations
+    );
+
+    const drop = previousRate - currentRate;
+
+    if (previousRate > 0 && drop >= config.threshold_value) {
+      await createNotification({
+        student_id: student.id,
+        alert_configuration_id: config.id,
+        alert_type: config.alert_type,
+        title: `Baisse de performance détectée`,
+        message: `Baisse de ${Math.round(drop)}% (de ${Math.round(previousRate)}% à ${Math.round(currentRate)}%)`,
+        severity: drop >= 30 ? 'high' : drop >= 15 ? 'medium' : 'low',
+        data: {
+          student_name: `${student.first_name} ${student.last_name}`,
+          previous_rate: previousRate,
+          current_rate: currentRate,
+        },
+        send_email: config.send_email,
+      });
+    }
+  }
+}
+
+/**
+ * Vérifie l'accumulation d'absences
+ */
+async function checkAbsenceAccumulation(config, students, absences) {
+  const relevantStudents = filterStudentsByClass(students, config.class_level);
+
+  for (const student of relevantStudents) {
+    const studentAbsences = absences.filter(
+      (a) => a.student_id === student.id && a.period === config.check_period
+    );
+
+    if (studentAbsences.length === 0) continue;
+
+    const absence = studentAbsences[0];
+    const totalAbsences = absence.absences_non_justifiees || 0;
+
+    if (totalAbsences >= config.threshold_value) {
+      await createNotification({
+        student_id: student.id,
+        alert_configuration_id: config.id,
+        alert_type: config.alert_type,
+        title: `Accumulation d'absences`,
+        message: `${totalAbsences} absence(s) non justifiée(s)`,
+        severity: totalAbsences >= 5 ? 'high' : 'medium',
+        data: {
+          student_name: `${student.first_name} ${student.last_name}`,
+          absence_count: totalAbsences,
+        },
+        send_email: config.send_email,
+      });
+    }
+  }
+}
+
+/**
+ * Vérifie un taux de réussite faible
+ */
+async function checkLowSuccessRate(
+  config,
+  students,
+  evaluations,
+  expectations,
+  subjects
+) {
+  const relevantStudents = filterStudentsByClass(students, config.class_level);
+
+  for (const student of relevantStudents) {
+    const rate = calculateSuccessRate(
+      student.id,
+      config.check_period,
+      config.subject_id,
+      evaluations,
+      expectations
+    );
+
+    if (rate > 0 && rate < config.threshold_value) {
+      const subject = config.subject_id
+        ? subjects.find((s) => s.id === config.subject_id)
+        : null;
+
+      await createNotification({
+        student_id: student.id,
+        alert_configuration_id: config.id,
+        alert_type: config.alert_type,
+        title: `Taux de réussite faible${subject ? ` en ${subject.name}` : ''}`,
+        message: `Taux de réussite: ${Math.round(rate)}%`,
+        severity: rate < 20 ? 'high' : 'medium',
+        data: {
+          student_name: `${student.first_name} ${student.last_name}`,
+          subject_name: subject?.name,
+          current_rate: rate,
+        },
+        send_email: config.send_email,
+      });
+    }
+  }
+}
+
+/**
+ * Crée une notification si elle n'existe pas déjà
+ */
+async function createNotification(data) {
+  try {
+    // Vérifier si une notification similaire existe déjà aujourd'hui
+    const existingNotifications = await base44.entities.Notification.filter({
+      student_id: data.student_id,
+      alert_configuration_id: data.alert_configuration_id,
+      trigger_date: new Date().toISOString().split('T')[0],
+    });
+
+    if (existingNotifications && existingNotifications.length > 0) {
+      return; // Notification déjà créée aujourd'hui
+    }
+
+    const notification = {
+      ...data,
+      trigger_date: new Date().toISOString().split('T')[0],
+      is_read: false,
+      email_sent: false,
+    };
+
+    await base44.entities.Notification.create(notification);
+
+    // Envoyer email si nécessaire
+    if (data.send_email) {
+      try {
+        await base44.integrations.Core.SendEmail({
+          to: 'teacher@example.com', // À remplacer par email du teacher
+          subject: data.title,
+          body: `${data.message}\n\nÉlève: ${data.data.student_name}`,
+        });
+      } catch (error) {
+        console.error('Erreur lors de l\'envoi d\'email:', error);
+      }
+    }
+  } catch (error) {
+    console.error('Erreur lors de la création de notification:', error);
+  }
+}
+
+/**
+ * Calcule le taux de réussite pour un étudiant
+ */
+function calculateSuccessRate(
+  studentId,
+  period,
+  subjectId,
+  evaluations,
+  expectations
+) {
+  let studentEvaluations = evaluations.filter(
+    (e) => e.student_id === studentId && e.period === period
+  );
+
+  if (subjectId) {
+    const subjectExpectations = expectations.filter(
+      (e) => e.subject_id === subjectId
+    );
+    studentEvaluations = studentEvaluations.filter((e) =>
+      subjectExpectations.some((exp) => exp.id === e.expectation_id)
+    );
+  }
+
+  const completed = studentEvaluations.filter((e) => e.status !== 'NE').length;
+  const acquired = studentEvaluations.filter((e) => e.status === 'A').length;
+
+  return completed > 0 ? (acquired / completed) * 100 : 0;
+}
+
+/**
+ * Filtre les étudiants par niveau de classe
+ */
+function filterStudentsByClass(students, classLevel) {
+  if (classLevel === 'all') return students;
+  return students.filter((s) => s.class_level === classLevel);
+}
